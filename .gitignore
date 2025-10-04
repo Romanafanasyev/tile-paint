@@ -1,0 +1,39 @@
+# ---- Python / IDE / OS ----
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.venv/
+venv/
+.env
+.env.*
+*.egg-info/
+dist/
+build/
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# ---- Project media ----
+# входные картинки не коммитим
+assets/input/**
+
+# артефакты рендеров/экспортов не коммитим
+outputs/**
+
+# если нужны пустые папки outputs/* в репо — добавь .gitkeep
+!outputs/.gitkeep
+!outputs/images/.gitkeep
+!outputs/video/.gitkeep
+
+# видеофайлы не коммитим (глобально)
+*.mp4
+*.m4v
+*.mov
+*.avi
+*.mkv
+*.webm
+
+# (кисть оставляем — папка brushes не игнорируется)
+# assets/brushes/brush.png будет отслеживаться
