@@ -81,7 +81,7 @@ class Config:
     seed: int = 42
 
     # Хвост статичных кадров
-    record_last_hold_frames: int = 30
+    record_last_hold_frames: int = 120
 
     # ----- ПОСТОБРАБОТКА ВИДЕО (плавная скорость, ЗАМЕНЯЕТ исходник) -----
     postprocess_speed: bool = True
