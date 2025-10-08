@@ -10,16 +10,30 @@ import imageio_ffmpeg
 from tqdm import tqdm
 
 from painter.config.config import Config
-from painter.io.files import ensure_dir_for, unique_path, load_image_rgb01, save_image_rgb01, load_brushes
-from painter.imagemath.image_math import hex_to_rgb01, rgb_to_gray01, simple_central_gradients, mse_per_pixel, mse_mean
+from painter.io.files import (
+    ensure_dir_for,
+    unique_path,
+    load_image_rgb01,
+    save_image_rgb01,
+    load_brushes,
+)
+from painter.imagemath.image_math import (
+    hex_to_rgb01,
+    rgb_to_gray01,
+    simple_central_gradients,
+    mse_per_pixel,
+    mse_mean,
+)
 from painter.strokes.sizes import make_all_sizes
 from painter.strokes.brush_ops import Brush, build_weight_mask
+from painter.strokes.roi_selection import CooldownMap, select_roi_center
 
 
-# -------------------------
-# Overlap of mask and frame
-# -------------------------
 def overlap_mask_and_frame(cx: int, cy: int, mask_w: int, mask_h: int, W: int, H: int):
+    """
+    Compute overlap between a brush mask and the canvas frame.
+    Returns indices for both canvas and mask, or None if fully outside.
+    """
     mask_left = cx - mask_w // 2
     mask_top = cy - mask_h // 2
     mask_right = mask_left + mask_w
@@ -43,9 +57,6 @@ def overlap_mask_and_frame(cx: int, cy: int, mask_w: int, mask_h: int, W: int, H
     return (X1, X2, Y1, Y2, MX1, MX2, MY1, MY2)
 
 
-# -------------------------
-# Gradients → local orientation
-# -------------------------
 def local_gradient_angle_deg(
     Ix: np.ndarray,
     Iy: np.ndarray,
@@ -56,6 +67,10 @@ def local_gradient_angle_deg(
     min_strength: float,
     jitter_deg: float,
 ) -> float:
+    """
+    Estimate brush orientation from local image gradients.
+    Uses sum of gradients within a size×size window; falls back to random if too weak.
+    """
     H, W = Ix.shape
     half = max(1, size // 2)
     x1 = max(0, cx - half)
@@ -70,8 +85,8 @@ def local_gradient_angle_deg(
     if strength < min_strength:
         angle = float(rng.uniform(0.0, 180.0))
     else:
-        phi = math.degrees(math.atan2(sy, sx))   # gradient direction
-        angle = phi + 90.0                       # along isophotes
+        phi = math.degrees(math.atan2(sy, sx))
+        angle = phi + 90.0  # along isophotes
 
     if jitter_deg > 1e-6:
         angle += float(rng.normal(0.0, jitter_deg))
@@ -82,10 +97,10 @@ def local_gradient_angle_deg(
     return angle
 
 
-# -------------------------
-# Stroke color / blend / evaluation
-# -------------------------
 def choose_color_from_target(roi_target: np.ndarray, weight_mask_2d: np.ndarray) -> np.ndarray:
+    """
+    Weighted average color inside ROI using the coverage mask.
+    """
     s = float(np.sum(weight_mask_2d))
     if s <= 1e-8:
         return roi_target.mean(axis=(0, 1), dtype=np.float32)
@@ -107,6 +122,10 @@ def try_one_stroke(
     use_alpha: bool,
     alpha_value: float,
 ) -> Tuple[bool, Optional[Tuple], float]:
+    """
+    Simulate and score a single stroke attempt at (x_center, y_center).
+    Returns (accepted, payload, gain_per_painted_pixel).
+    """
     H, W, _ = canvas.shape
     mask = brush.render(block_size, angle_deg)
     mh, mw = mask.shape
@@ -141,67 +160,24 @@ def try_one_stroke(
     return False, None, 0.0
 
 
-def commit_payload(canvas: np.ndarray, err_map: np.ndarray, target: np.ndarray, payload: Tuple):
+def commit_payload(canvas: np.ndarray, err_map: np.ndarray, target: np.ndarray, payload: Tuple) -> None:
+    """
+    Write accepted ROI into the canvas and update the error map accordingly.
+    """
     X1, X2, Y1, Y2, new_roi, _mask_roi = payload
     roi_target = target[Y1:Y2, X1:X2]
     canvas[Y1:Y2, X1:X2] = new_roi
     err_map[Y1:Y2, X1:X2] = mse_per_pixel(new_roi, roi_target)
 
 
-# -------------------------
-# ROI selection (+ cooldown)
-# -------------------------
-def select_roi_center(
-    err_map: np.ndarray,
-    sel_weight: Optional[np.ndarray],
-    method: str,
-    topk: int,
-    rng: np.random.Generator,
-) -> Tuple[int, int]:
-    weighted = err_map if sel_weight is None else err_map * sel_weight
-    H, W = weighted.shape
-    if method == "argmax":
-        idx = int(np.argmax(weighted))
-        y, x = np.unravel_index(idx, (H, W))
-        return int(y), int(x)
-    elif method == "topk_random":
-        flat = weighted.ravel()
-        k = min(topk, flat.size)
-        part = np.argpartition(flat, -k)[-k:]
-        idx = int(part[int(rng.integers(0, k))])
-        y, x = np.unravel_index(idx, (H, W))
-        return int(y), int(x)
-    else:
-        raise ValueError(f"Unknown roi_sampling: {method}")
-
-
-def update_cooldown(sel_weight: Optional[np.ndarray], payload: Tuple, cfg: Config):
-    if sel_weight is None or not cfg.use_cooldown:
-        return
-    X1, X2, Y1, Y2, _new_roi, mask_roi = payload
-    m = (mask_roi > 0).astype(np.float32)
-    block = sel_weight[Y1:Y2, X1:X2]
-    block *= (1.0 - (1.0 - cfg.cooldown_factor) * m)
-    np.clip(block, cfg.cooldown_min, cfg.cooldown_max, out=block)
-    sel_weight[Y1:Y2, X1:X2] = block
-
-
-def recover_cooldown(sel_weight: Optional[np.ndarray], cfg: Config):
-    if sel_weight is None or not cfg.use_cooldown:
-        return
-    np.multiply(sel_weight, cfg.cooldown_recover, out=sel_weight)
-    np.clip(sel_weight, cfg.cooldown_min, cfg.cooldown_max, out=sel_weight)
-
-
-# -------------------------
-# Video postprocess: smooth speed ramp (in-place replace)
-# -------------------------
 def _smoothstep(x: float) -> float:
+    """S-curve easing in [0,1]."""
     x = max(0.0, min(1.0, x))
     return x * x * (3 - 2 * x)
 
 
 def _get_duration_seconds(path: str) -> float:
+    """Probe container metadata for duration (fallback: frames/fps)."""
     rdr = imageio.get_reader(path)
     try:
         meta = rdr.get_meta_data()
@@ -218,6 +194,7 @@ def _get_duration_seconds(path: str) -> float:
 
 
 def _has_audio_track(path: str, ffmpeg_bin: str) -> bool:
+    """Return True if the input video contains an audio stream."""
     proc = subprocess.run(
         [ffmpeg_bin, "-hide_banner", "-i", path],
         stdout=subprocess.PIPE,
@@ -228,6 +205,7 @@ def _has_audio_track(path: str, ffmpeg_bin: str) -> bool:
 
 
 def _clamp_segments(total: float, slow_sec: float, fast_sec: float, margin: float = 0.02):
+    """Ensure slow+fast <= total - margin; scale down if needed."""
     slow_sec = max(0.0, slow_sec)
     fast_sec = max(0.0, fast_sec)
     if slow_sec + fast_sec <= max(0.0, total - margin):
@@ -239,7 +217,10 @@ def _clamp_segments(total: float, slow_sec: float, fast_sec: float, margin: floa
 
 
 def _atempo_chain_str(speed: float) -> str:
-    chain: List[str] = []
+    """
+    Build an ffmpeg atempo chain for an arbitrary speed factor by composing steps within [0.5, 2.0].
+    """
+    chain = []
     s = float(speed)
     if abs(s - 1.0) < 1e-6:
         return ""
@@ -262,6 +243,11 @@ def _build_filter_complex(
     slow_from: float,
     fast_to: float,
 ):
+    """
+    Assemble ffmpeg filter_complex that ramps speed:
+      slow_from→1.0 over the first slow_sec, 1.0 flat in the middle,
+      1.0→fast_to over the last fast_sec.
+    """
     vin, ain = "0:v", "0:a"
     parts_v, parts_a, lines = [], [], []
 
@@ -338,6 +324,9 @@ def postprocess_video_speed_replace(
     slow_from: float,
     fast_to: float,
 ) -> str:
+    """
+    Apply a smooth speed ramp to the video in-place using a temporary file and rename.
+    """
     ffmpeg_bin = imageio_ffmpeg.get_ffmpeg_exe()
     duration = _get_duration_seconds(input_path)
     slow_sec, fast_sec = _clamp_segments(duration, slow_seconds, fast_seconds)
@@ -391,10 +380,11 @@ def postprocess_video_speed_replace(
     return input_path
 
 
-# -------------------------
-# Main pipeline
-# -------------------------
 def main(cfg: Config) -> None:
+    """
+    Orchestrate the painting pipeline:
+    load inputs, iterate over size phases, emit optional video, postprocess speed.
+    """
     rng = np.random.default_rng(cfg.seed)
 
     target = load_image_rgb01(cfg.input_image_path, cfg.max_size)
@@ -404,7 +394,13 @@ def main(cfg: Config) -> None:
     brushes: List[Brush] = load_brushes(cfg.brush_paths)
 
     err_map = mse_per_pixel(canvas, target)
-    sel_weight = np.ones_like(err_map, dtype=np.float32) if cfg.use_cooldown else None
+    cooldown = CooldownMap(
+        shape=err_map.shape,
+        enabled=cfg.use_cooldown,
+        min_val=cfg.cooldown_min,
+        max_val=cfg.cooldown_max,
+        recover_factor=cfg.cooldown_recover,
+    )
 
     sizes = make_all_sizes(cfg, W, H)
     current_level = 0
@@ -441,9 +437,15 @@ def main(cfg: Config) -> None:
     pbar = tqdm(total=cfg.total_strokes, desc="Painting", ncols=80)
     try:
         for _ in range(cfg.total_strokes):
-            recover_cooldown(sel_weight, cfg)
+            cooldown.recover()
 
-            y, x = select_roi_center(err_map, sel_weight, cfg.roi_sampling, cfg.topk, rng)
+            y, x = select_roi_center(
+                err_map=err_map,
+                sel_weight=cooldown.array,
+                method=cfg.roi_sampling,
+                topk=cfg.topk,
+                rng=rng,
+            )
 
             if cfg.orientation_mode == "gradient":
                 angle = local_gradient_angle_deg(
@@ -473,7 +475,7 @@ def main(cfg: Config) -> None:
 
             if accepted and payload is not None:
                 commit_payload(canvas, err_map, target, payload)
-                update_cooldown(sel_weight, payload, cfg)
+                cooldown.apply_after_payload(payload, cfg.cooldown_factor)
 
             global_step += 1
             pbar.update(1)
@@ -496,8 +498,7 @@ def main(cfg: Config) -> None:
                 attempts_in_phase = 0
                 accept_window.clear()
                 phase_max_attempts = phase_max_attempts_for(current_size)
-                if sel_weight is not None:
-                    sel_weight.fill(1.0)
+                cooldown.reset()
 
             if cfg.target_mse is not None and float(np.mean(err_map)) <= cfg.target_mse:
                 break
