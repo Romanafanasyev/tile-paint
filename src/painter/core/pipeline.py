@@ -5,30 +5,15 @@ from typing import List, Optional, Tuple, Deque
 from collections import deque
 
 import numpy as np
-from PIL import Image
 import imageio.v2 as imageio
 import imageio_ffmpeg
 from tqdm import tqdm
 
 from painter.config.config import Config
-from painter.io.files import ensure_dir_for, unique_path, load_image_rgb01, save_image_rgb01, load_brushes_gray01
+from painter.io.files import ensure_dir_for, unique_path, load_image_rgb01, save_image_rgb01, load_brushes
 from painter.imagemath.image_math import hex_to_rgb01, rgb_to_gray01, simple_central_gradients, mse_per_pixel, mse_mean
 from painter.strokes.sizes import make_all_sizes
-
-
-# -------------------------
-# Brush mask: scale / rotate
-# -------------------------
-def scale_and_rotate_mask(mask01: np.ndarray, target_box_size: int, angle_deg: float) -> np.ndarray:
-    Hb, Wb = mask01.shape
-    scale = target_box_size / float(max(Hb, Wb))
-    new_h = max(1, int(round(Hb * scale)))
-    new_w = max(1, int(round(Wb * scale)))
-    img = Image.fromarray((mask01 * 255.0).astype(np.uint8))
-    img = img.resize((new_w, new_h), resample=Image.BILINEAR)
-    if abs(angle_deg) > 1e-6:
-        img = img.rotate(angle_deg, resample=Image.BILINEAR, expand=True, fillcolor=0)
-    return np.asarray(img, dtype=np.float32) / 255.0
+from painter.strokes.brush_ops import Brush, build_weight_mask
 
 
 # -------------------------
@@ -109,25 +94,10 @@ def choose_color_from_target(roi_target: np.ndarray, weight_mask_2d: np.ndarray)
     return (num / s).astype(np.float32)
 
 
-def build_weight_mask(
-    mask_roi: np.ndarray,
-    use_soft_edges: bool,
-    mask_threshold: float,
-    use_alpha: bool,
-    alpha_value: float,
-) -> Tuple[np.ndarray, np.ndarray]:
-    if use_soft_edges:
-        m = np.clip(mask_roi, 0.0, 1.0).astype(np.float32)
-    else:
-        m = (mask_roi >= mask_threshold).astype(np.float32)
-    wmask = np.clip(alpha_value * m, 0.0, 1.0) if use_alpha else m
-    return m, wmask
-
-
 def try_one_stroke(
     canvas: np.ndarray,
     target: np.ndarray,
-    brush: np.ndarray,
+    brush: Brush,
     x_center: int,
     y_center: int,
     block_size: int,
@@ -138,7 +108,7 @@ def try_one_stroke(
     alpha_value: float,
 ) -> Tuple[bool, Optional[Tuple], float]:
     H, W, _ = canvas.shape
-    mask = scale_and_rotate_mask(brush, block_size, angle_deg)
+    mask = brush.render(block_size, angle_deg)
     mh, mw = mask.shape
     if mh == 0 or mw == 0:
         return False, None, 0.0
@@ -269,7 +239,6 @@ def _clamp_segments(total: float, slow_sec: float, fast_sec: float, margin: floa
 
 
 def _atempo_chain_str(speed: float) -> str:
-    """Build an atempo chain for arbitrary speed factor (compose 0.5..2.0 steps)."""
     chain: List[str] = []
     s = float(speed)
     if abs(s - 1.0) < 1e-6:
@@ -369,7 +338,6 @@ def postprocess_video_speed_replace(
     slow_from: float,
     fast_to: float,
 ) -> str:
-    """Apply a smooth speed ramp and replace the original file in-place."""
     ffmpeg_bin = imageio_ffmpeg.get_ffmpeg_exe()
     duration = _get_duration_seconds(input_path)
     slow_sec, fast_sec = _clamp_segments(duration, slow_seconds, fast_seconds)
@@ -433,7 +401,7 @@ def main(cfg: Config) -> None:
     H, W, _ = target.shape
     start_rgb = hex_to_rgb01(cfg.start_color_hex)
     canvas = np.ones_like(target, dtype=np.float32) * start_rgb
-    brushes = load_brushes_gray01(cfg.brush_paths)
+    brushes: List[Brush] = load_brushes(cfg.brush_paths)
 
     err_map = mse_per_pixel(canvas, target)
     sel_weight = np.ones_like(err_map, dtype=np.float32) if cfg.use_cooldown else None
