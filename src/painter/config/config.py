@@ -24,22 +24,22 @@ class Config:
     max_size: int = 0
 
     # --- High-level workload scaling knob (used to derive a few defaults) ---
-    workload_scale: int = 25
+    workload_scale: int = 1
 
     # --- Compute budget / quality ---
     total_strokes: int = 1000 * workload_scale
     target_mse: Optional[float] = None          # e.g., 1e-3; None = disabled
 
-    # --- Coarse→fine size schedule (strict phases; no size mixing) ---
+    # --- Coarse->fine size schedule (strict phases; no size mixing) ---
     size_scale_mode: str = "log"                # "log" | "linear"
     levels: int = 5
     largest_frac: float = 0.35                  # s_max = largest_frac * min(H, W)
     smallest_px: int = 10                       # lower bound (never 1px noise)
 
-    # --- Phase transition rules (strictly go from large → small) ---
+    # --- Phase transition rules (strictly go from large -> small) ---
     phase_min_strokes: int = 100                # minimum attempts per phase
     phase_accept_window: int = 120              # rolling window length
-    phase_accept_threshold: float = 0.05        # if accept-rate < threshold → move down
+    phase_accept_threshold: float = 0.05        # if accept-rate < threshold -> move down
     phase_max_attempts_factor: float = 6.0      # ~factor * (H*W/size^2) attempts per phase
 
     # --- Stroke center selection ---
@@ -63,7 +63,7 @@ class Config:
 
     # --- Orientation of strokes ---
     orientation_mode: str = "gradient"          # "gradient" | "none" | "random"
-    grad_min_strength: float = 1e-6             # weak structure → random angle
+    grad_min_strength: float = 1e-6             # weak structure -> random angle
     angle_jitter_deg: float = 0.0               # Gaussian jitter
 
     # --- Transparency of strokes ---

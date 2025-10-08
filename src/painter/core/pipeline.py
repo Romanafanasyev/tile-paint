@@ -10,147 +10,10 @@ import imageio.v2 as imageio
 import imageio_ffmpeg
 from tqdm import tqdm
 
-from painter.config import Config
-
-
-# -------------------------
-# File/path utilities
-# -------------------------
-def ensure_dir_for(path: str) -> None:
-    d = os.path.dirname(path)
-    if d and not os.path.exists(d):
-        os.makedirs(d, exist_ok=True)
-
-
-def unique_path(path: str) -> str:
-    base, ext = os.path.splitext(path)
-    candidate = path
-    k = 1
-    while os.path.exists(candidate):
-        candidate = f"{base}_{k}{ext}"
-        k += 1
-    return candidate
-
-
-# -------------------------
-# Image I/O and conversions
-# -------------------------
-def hex_to_rgb01(hex_color: str) -> np.ndarray:
-    h = hex_color.lstrip("#")
-    r = int(h[0:2], 16) / 255.0
-    g = int(h[2:4], 16) / 255.0
-    b = int(h[4:6], 16) / 255.0
-    return np.array([r, g, b], dtype=np.float32)
-
-
-def load_image_rgb01(path: str, max_size: int = 0) -> np.ndarray:
-    im = Image.open(path).convert("RGB")
-    if max_size and max(im.size) > max_size:
-        w, h = im.size
-        if w >= h:
-            new_w = max_size
-            new_h = int(round(h * (max_size / w)))
-        else:
-            new_h = max_size
-            new_w = int(round(w * (max_size / h)))
-        im = im.resize((new_w, new_h), Image.LANCZOS)
-    return np.asarray(im, dtype=np.float32) / 255.0
-
-
-def save_image_rgb01(path: str, img: np.ndarray) -> str:
-    ensure_dir_for(path)
-    path2 = unique_path(path)
-    img8 = np.clip(img * 255.0, 0, 255).astype(np.uint8)
-    Image.fromarray(img8, mode="RGB").save(path2)
-    return path2
-
-
-def load_brushes_gray01(paths: List[str]) -> List[np.ndarray]:
-    out = []
-    for p in paths:
-        if not os.path.exists(p):
-            raise FileNotFoundError(f"Brush file not found: {p}")
-        arr = np.asarray(Image.open(p).convert("L"), dtype=np.float32) / 255.0
-        out.append(arr)
-    if not out:
-        raise RuntimeError("No brush masks loaded. Check Config.brush_paths.")
-    return out
-
-
-# -------------------------
-# Metrics / error map
-# -------------------------
-def mse_per_pixel(a: np.ndarray, b: np.ndarray) -> np.ndarray:
-    d = a - b
-    return np.mean(d * d, axis=2)
-
-
-def mse_mean(a: np.ndarray, b: np.ndarray) -> float:
-    return float(np.mean((a - b) ** 2))
-
-
-# -------------------------
-# Gradients / orientation
-# -------------------------
-def rgb_to_gray01(img: np.ndarray) -> np.ndarray:
-    # ITU-R BT.709 luma
-    return (0.2126 * img[..., 0] + 0.7152 * img[..., 1] + 0.0722 * img[..., 2]).astype(np.float32)
-
-
-def simple_central_gradients(gray: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
-    """
-    Central-difference gradients with clamped edges.
-    Returns (Ix, Iy) where Ix is horizontal gradient and Iy is vertical gradient.
-    """
-    H, W = gray.shape
-    Ix = 0.5 * (np.roll(gray, -1, axis=1) - np.roll(gray, 1, axis=1))
-    Iy = 0.5 * (np.roll(gray, -1, axis=0) - np.roll(gray, 1, axis=0))
-    # edge handling (first/last rows/cols)
-    Ix[:, 0] = gray[:, 1] - gray[:, 0]
-    Ix[:, -1] = gray[:, -1] - gray[:, -2]
-    Iy[0, :] = gray[1, :] - gray[0, :]
-    Iy[-1, :] = gray[-1, :] - gray[-2, :]
-    return Ix, Iy
-
-
-def local_gradient_angle_deg(
-    Ix: np.ndarray,
-    Iy: np.ndarray,
-    cx: int,
-    cy: int,
-    size: int,
-    rng: np.random.Generator,
-    min_strength: float,
-    jitter_deg: float,
-) -> float:
-    """
-    Estimate stroke orientation from gradients in a size×size window around (cx, cy).
-    If gradients are weak, fall back to a random angle. Align strokes along isophotes.
-    """
-    H, W = Ix.shape
-    half = max(1, size // 2)
-    x1 = max(0, cx - half)
-    y1 = max(0, cy - half)
-    x2 = min(W, cx + half)
-    y2 = min(H, cy + half)
-
-    sx = float(np.sum(Ix[y1:y2, x1:x2]))
-    sy = float(np.sum(Iy[y1:y2, x1:x2]))
-    strength = sx * sx + sy * sy
-
-    if strength < min_strength:
-        angle = float(rng.uniform(0.0, 180.0))
-    else:
-        phi = math.degrees(math.atan2(sy, sx))   # gradient direction
-        angle = phi + 90.0                       # along isophotes
-
-    if jitter_deg > 1e-6:
-        angle += float(rng.normal(0.0, jitter_deg))
-    while angle < 0.0:
-        angle += 180.0
-    while angle >= 180.0:
-        angle -= 180.0
-    return angle
+from painter.config.config import Config
+from painter.io.files import ensure_dir_for, unique_path, load_image_rgb01, save_image_rgb01, load_brushes_gray01
+from painter.imagemath.image_math import hex_to_rgb01, rgb_to_gray01, simple_central_gradients, mse_per_pixel, mse_mean
+from painter.strokes.sizes import make_all_sizes
 
 
 # -------------------------
@@ -193,6 +56,45 @@ def overlap_mask_and_frame(cx: int, cy: int, mask_w: int, mask_h: int, W: int, H
     MY1 = max(0, min(MY1, mask_h))
     MY2 = max(0, min(MY2, mask_h))
     return (X1, X2, Y1, Y2, MX1, MX2, MY1, MY2)
+
+
+# -------------------------
+# Gradients → local orientation
+# -------------------------
+def local_gradient_angle_deg(
+    Ix: np.ndarray,
+    Iy: np.ndarray,
+    cx: int,
+    cy: int,
+    size: int,
+    rng: np.random.Generator,
+    min_strength: float,
+    jitter_deg: float,
+) -> float:
+    H, W = Ix.shape
+    half = max(1, size // 2)
+    x1 = max(0, cx - half)
+    y1 = max(0, cy - half)
+    x2 = min(W, cx + half)
+    y2 = min(H, cy + half)
+
+    sx = float(np.sum(Ix[y1:y2, x1:x2]))
+    sy = float(np.sum(Iy[y1:y2, x1:x2]))
+    strength = sx * sx + sy * sy
+
+    if strength < min_strength:
+        angle = float(rng.uniform(0.0, 180.0))
+    else:
+        phi = math.degrees(math.atan2(sy, sx))   # gradient direction
+        angle = phi + 90.0                       # along isophotes
+
+    if jitter_deg > 1e-6:
+        angle += float(rng.normal(0.0, jitter_deg))
+    while angle < 0.0:
+        angle += 180.0
+    while angle >= 180.0:
+        angle -= 180.0
+    return angle
 
 
 # -------------------------
@@ -322,22 +224,6 @@ def recover_cooldown(sel_weight: Optional[np.ndarray], cfg: Config):
 
 
 # -------------------------
-# Size ladder (strict large→small)
-# -------------------------
-def make_all_sizes(cfg: Config, W: int, H: int) -> List[int]:
-    s_max = max(cfg.smallest_px, int(round(min(W, H) * cfg.largest_frac)))
-    s_min = max(1, int(cfg.smallest_px))
-    L = max(2, int(cfg.levels))
-    if cfg.size_scale_mode == "linear":
-        step = (s_max - s_min) / float(L - 1)
-        sizes = [max(1, int(round(s_max - i * step))) for i in range(L)]
-    else:
-        sizes = [max(1, int(round(s_max * (s_min / s_max) ** (i / (L - 1))))) for i in range(L)]
-    sizes = sorted(set(sizes), reverse=True)
-    return [max(s_min, s) for s in sizes]
-
-
-# -------------------------
 # Video postprocess: smooth speed ramp (in-place replace)
 # -------------------------
 def _smoothstep(x: float) -> float:
@@ -383,10 +269,7 @@ def _clamp_segments(total: float, slow_sec: float, fast_sec: float, margin: floa
 
 
 def _atempo_chain_str(speed: float) -> str:
-    """
-    Build an atempo chain for arbitrary speed factor
-    (ffmpeg supports 0.5..2.0 per filter, so we compose).
-    """
+    """Build an atempo chain for arbitrary speed factor (compose 0.5..2.0 steps)."""
     chain: List[str] = []
     s = float(speed)
     if abs(s - 1.0) < 1e-6:
@@ -430,7 +313,6 @@ def _build_filter_complex(
                 lines.append(f"[{ain}]atrim=start={t1:.6f}:end={t2:.6f},asetpts=PTS-STARTPTS{a_label}")
             parts_a.append(a_label)
 
-    # ramp-in slow_from → 1.0
     if slow_sec > 1e-6:
         dt = slow_sec / steps
         for i in range(steps):
@@ -440,7 +322,6 @@ def _build_filter_complex(
             s = slow_from + (1.0 - slow_from) * _smoothstep(u)
             add_segment(t1, t2, s, f"s{i}")
 
-    # mid 1.0x
     mid_start, mid_end = slow_sec, max(slow_sec, duration - fast_sec)
     if mid_end - mid_start > 1e-6:
         v_mid = "[vMid]"
@@ -451,7 +332,6 @@ def _build_filter_complex(
             lines.append(f"[{ain}]atrim=start={mid_start:.6f}:end={mid_end:.6f},asetpts=PTS-STARTPTS{a_mid}")
             parts_a.append(a_mid)
 
-    # ramp-out 1.0 → fast_to
     if fast_sec > 1e-6:
         dt = fast_sec / steps
         base = duration - fast_sec
@@ -549,30 +429,25 @@ def postprocess_video_speed_replace(
 def main(cfg: Config) -> None:
     rng = np.random.default_rng(cfg.seed)
 
-    # Load target and initialize canvas
     target = load_image_rgb01(cfg.input_image_path, cfg.max_size)
     H, W, _ = target.shape
     start_rgb = hex_to_rgb01(cfg.start_color_hex)
     canvas = np.ones_like(target, dtype=np.float32) * start_rgb
     brushes = load_brushes_gray01(cfg.brush_paths)
 
-    # Error map and selection weights
     err_map = mse_per_pixel(canvas, target)
     sel_weight = np.ones_like(err_map, dtype=np.float32) if cfg.use_cooldown else None
 
-    # Size schedule (strict phases)
     sizes = make_all_sizes(cfg, W, H)
     current_level = 0
     current_size = sizes[current_level]
 
-    # Orientation precomputation
     if cfg.orientation_mode == "gradient":
         gray = rgb_to_gray01(target)
         Ix, Iy = simple_central_gradients(gray)
     else:
         Ix = Iy = None
 
-    # Video writer setup
     writer = None
     video_path_final = None
     if cfg.make_video:
@@ -600,10 +475,8 @@ def main(cfg: Config) -> None:
         for _ in range(cfg.total_strokes):
             recover_cooldown(sel_weight, cfg)
 
-            # Pick center
             y, x = select_roi_center(err_map, sel_weight, cfg.roi_sampling, cfg.topk, rng)
 
-            # Angle at current size
             if cfg.orientation_mode == "gradient":
                 angle = local_gradient_angle_deg(
                     Ix, Iy, x, y, current_size, rng, cfg.grad_min_strength, cfg.angle_jitter_deg
@@ -613,7 +486,6 @@ def main(cfg: Config) -> None:
             else:
                 angle = 0.0
 
-            # Try a stroke
             brush = brushes[int(rng.integers(0, len(brushes)))]
             accepted, payload, _gain_pp = try_one_stroke(
                 canvas,
@@ -638,11 +510,9 @@ def main(cfg: Config) -> None:
             global_step += 1
             pbar.update(1)
 
-            # Write frame
             if writer is not None and (global_step % save_every == 0):
                 writer.append_data(np.clip(canvas * 255.0, 0, 255).astype(np.uint8))
 
-            # Phase transition
             move_down = False
             if attempts_in_phase >= cfg.phase_min_strokes:
                 if len(accept_window) >= min(cfg.phase_accept_window, cfg.phase_min_strokes):
@@ -661,16 +531,13 @@ def main(cfg: Config) -> None:
                 if sel_weight is not None:
                     sel_weight.fill(1.0)
 
-            # Early stop by target MSE
             if cfg.target_mse is not None and float(np.mean(err_map)) <= cfg.target_mse:
                 break
     finally:
         pbar.close()
 
-    # Save final image
     img_path = save_image_rgb01(cfg.output_final_image_path, canvas)
 
-    # Finalize video and apply speed ramp (in-place)
     if writer is not None and video_path_final:
         last = np.clip(canvas * 255.0, 0, 255).astype(np.uint8)
         for _ in range(max(0, cfg.record_last_hold_frames)):
@@ -693,7 +560,6 @@ def main(cfg: Config) -> None:
             except Exception as e:
                 print(f"[warn] speed postprocess failed: {e}")
 
-    # Summary
     if writer is not None and video_path_final:
         print(f"Done. Image: {img_path} | Video: {video_path_final}")
     else:
