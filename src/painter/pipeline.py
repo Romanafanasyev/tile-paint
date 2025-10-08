@@ -1,7 +1,6 @@
 import os
 import math
 import subprocess
-from dataclasses import dataclass, field
 from typing import List, Optional, Tuple, Deque
 from collections import deque
 
@@ -11,97 +10,12 @@ import imageio.v2 as imageio
 import imageio_ffmpeg
 from tqdm import tqdm
 
-
-# =========================
-# CONFIG — все параметры тут
-# =========================
-@dataclass
-class Config:
-    # Вход/выход (относительные пути от папки src/)
-    input_image_path: str = "../assets/input/sof1.jpg"        # PNG/JPG
-    output_final_image_path: str = "../outputs/images/final.png"
-    make_video: bool = True
-    output_video_path: str = "../outputs/video/out.mp4"
-    video_fps: int = 30
-
-    # Длительность видео (любой из вариантов):
-    save_every_n_strokes: Optional[int] = 10   # приоритетнее
-    video_duration_sec: Optional[int] = 15       # если save_every не задан
-
-    # Масштаб входного изображения для ускорения (0 = не менять)
-    max_size: int = 0
-
-    multiplier: int = 25
-
-    # Бюджет работы/качества
-    total_strokes: int = 1000 * multiplier
-    target_mse: Optional[float] = None
-
-    # ----- АВТО-МАСШТАБ (coarse→fine), БЕЗ СМЕШИВАНИЯ РАЗМЕРОВ -----
-    size_scale_mode: str = "log"                 # "log" | "linear"
-    levels: int = 5
-    largest_frac: float = 0.35
-    smallest_px: int = 10
-
-    # Правила перехода между фазами (строго крупн->мелк)
-    phase_min_strokes: int = 100
-    phase_accept_window: int = 120
-    phase_accept_threshold: float = 0.05
-    phase_max_attempts_factor: float = 6.0
-
-    # Выбор центра мазка
-    roi_sampling: str = "topk_random"            # "argmax" | "topk_random"
-    topk: int = 4096
-
-    # Анти-залипание (механизм выбора, не меняет реальную ошибку)
-    use_cooldown: bool = True
-    cooldown_factor: float = 0.6
-    cooldown_recover: float = 1.02
-    cooldown_min: float = 0.25
-    cooldown_max: float = 1.0
-
-    # Цвет стартового холста — HEX
-    start_color_hex: str = "#FFFFFF"
-
-    # Кисти (маски)
-    brush_paths: List[str] = field(default_factory=lambda: ["../assets/brushes/brush.png"])
-    use_soft_edges: bool = True
-    mask_threshold: float = 0.5
-
-    # Ориентация мазка
-    orientation_mode: str = "gradient"           # "gradient" | "none" | "random"
-    grad_min_strength: float = 1e-6
-    angle_jitter_deg: float = 0.0
-
-    # Прозрачность
-    use_alpha: bool = False
-    alpha_value: float = 0.25
-
-    # Случайность
-    seed: int = 42
-
-    # Хвост статичных кадров
-    record_last_hold_frames: int = 120
-
-    # ----- ПОСТОБРАБОТКА ВИДЕО (плавная скорость, ЗАМЕНЯЕТ исходник) -----
-    postprocess_speed: bool = True
-    # длительность замедления в начале и ускорения в конце (сек)
-    speed_slow_seconds: float = 4.0
-    speed_fast_seconds: float = 2.64 * multiplier
-    # во сколько раз замедлять в самом начале и ускорять в самом конце
-    # 0.5 = в 2 раза медленнее (50% скорости), 3.0 = в 3 раза быстрее
-    speed_slow_from: float = 0.2
-    speed_fast_to: float = 1.0 * multiplier
-    # плавность и кодек-параметры
-    speed_steps: int = 10
-    speed_crf: int = 18
-    speed_preset: str = "fast"
-    speed_fps: Optional[float] = None  # можно зафиксировать FPS (например, 30)
+from painter.config import Config
 
 
-# =========================
-# Утилиты файлов/путей
-# =========================
+# -------------------------
+# File/path utilities
+# -------------------------
 def ensure_dir_for(path: str) -> None:
     d = os.path.dirname(path)
     if d and not os.path.exists(d):
@@ -118,9 +32,9 @@ def unique_path(path: str) -> str:
     return candidate
 
 
-# =========================
-# Утилиты изображений
-# =========================
+# -------------------------
+# Image I/O and conversions
+# -------------------------
 def hex_to_rgb01(hex_color: str) -> np.ndarray:
     h = hex_color.lstrip("#")
     r = int(h[0:2], 16) / 255.0
@@ -163,9 +77,9 @@ def load_brushes_gray01(paths: List[str]) -> List[np.ndarray]:
     return out
 
 
-# =========================
-# Метрики/карта ошибки
-# =========================
+# -------------------------
+# Metrics / error map
+# -------------------------
 def mse_per_pixel(a: np.ndarray, b: np.ndarray) -> np.ndarray:
     d = a - b
     return np.mean(d * d, axis=2)
@@ -175,17 +89,23 @@ def mse_mean(a: np.ndarray, b: np.ndarray) -> float:
     return float(np.mean((a - b) ** 2))
 
 
-# =========================
-# Градиенты/ориентация
-# =========================
+# -------------------------
+# Gradients / orientation
+# -------------------------
 def rgb_to_gray01(img: np.ndarray) -> np.ndarray:
+    # ITU-R BT.709 luma
     return (0.2126 * img[..., 0] + 0.7152 * img[..., 1] + 0.0722 * img[..., 2]).astype(np.float32)
 
 
 def simple_central_gradients(gray: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Central-difference gradients with clamped edges.
+    Returns (Ix, Iy) where Ix is horizontal gradient and Iy is vertical gradient.
+    """
     H, W = gray.shape
     Ix = 0.5 * (np.roll(gray, -1, axis=1) - np.roll(gray, 1, axis=1))
     Iy = 0.5 * (np.roll(gray, -1, axis=0) - np.roll(gray, 1, axis=0))
+    # edge handling (first/last rows/cols)
     Ix[:, 0] = gray[:, 1] - gray[:, 0]
     Ix[:, -1] = gray[:, -1] - gray[:, -2]
     Iy[0, :] = gray[1, :] - gray[0, :]
@@ -193,12 +113,26 @@ def simple_central_gradients(gray: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
     return Ix, Iy
 
 
-def local_gradient_angle_deg(Ix: np.ndarray, Iy: np.ndarray, cx: int, cy: int, size: int,
-                             rng: np.random.Generator, min_strength: float, jitter_deg: float) -> float:
+def local_gradient_angle_deg(
+    Ix: np.ndarray,
+    Iy: np.ndarray,
+    cx: int,
+    cy: int,
+    size: int,
+    rng: np.random.Generator,
+    min_strength: float,
+    jitter_deg: float,
+) -> float:
+    """
+    Estimate stroke orientation from gradients in a size×size window around (cx, cy).
+    If gradients are weak, fall back to a random angle. Align strokes along isophotes.
+    """
     H, W = Ix.shape
     half = max(1, size // 2)
-    x1 = max(0, cx - half); y1 = max(0, cy - half)
-    x2 = min(W, cx + half); y2 = min(H, cy + half)
+    x1 = max(0, cx - half)
+    y1 = max(0, cy - half)
+    x2 = min(W, cx + half)
+    y2 = min(H, cy + half)
 
     sx = float(np.sum(Ix[y1:y2, x1:x2]))
     sy = float(np.sum(Iy[y1:y2, x1:x2]))
@@ -207,19 +141,21 @@ def local_gradient_angle_deg(Ix: np.ndarray, Iy: np.ndarray, cx: int, cy: int, s
     if strength < min_strength:
         angle = float(rng.uniform(0.0, 180.0))
     else:
-        phi = math.degrees(math.atan2(sy, sx))
-        angle = phi + 90.0
+        phi = math.degrees(math.atan2(sy, sx))   # gradient direction
+        angle = phi + 90.0                       # along isophotes
 
     if jitter_deg > 1e-6:
         angle += float(rng.normal(0.0, jitter_deg))
-    while angle < 0.0:   angle += 180.0
-    while angle >= 180.0: angle -= 180.0
+    while angle < 0.0:
+        angle += 180.0
+    while angle >= 180.0:
+        angle -= 180.0
     return angle
 
 
-# =========================
-# Маска кисти: масштаб/поворот
-# =========================
+# -------------------------
+# Brush mask: scale / rotate
+# -------------------------
 def scale_and_rotate_mask(mask01: np.ndarray, target_box_size: int, angle_deg: float) -> np.ndarray:
     Hb, Wb = mask01.shape
     scale = target_box_size / float(max(Hb, Wb))
@@ -232,30 +168,36 @@ def scale_and_rotate_mask(mask01: np.ndarray, target_box_size: int, angle_deg: f
     return np.asarray(img, dtype=np.float32) / 255.0
 
 
-# =========================
-# Перекрытие маски с кадром
-# =========================
+# -------------------------
+# Overlap of mask and frame
+# -------------------------
 def overlap_mask_and_frame(cx: int, cy: int, mask_w: int, mask_h: int, W: int, H: int):
     mask_left = cx - mask_w // 2
-    mask_top  = cy - mask_h // 2
+    mask_top = cy - mask_h // 2
     mask_right = mask_left + mask_w
     mask_bottom = mask_top + mask_h
 
-    X1 = max(0, mask_left);  Y1 = max(0, mask_top)
-    X2 = min(W, mask_right); Y2 = min(H, mask_bottom)
+    X1 = max(0, mask_left)
+    Y1 = max(0, mask_top)
+    X2 = min(W, mask_right)
+    Y2 = min(H, mask_bottom)
     if X1 >= X2 or Y1 >= Y2:
         return None
 
-    MX1 = X1 - mask_left; MY1 = Y1 - mask_top
-    MX2 = MX1 + (X2 - X1);  MY2 = MY1 + (Y2 - Y1)
-    MX1 = max(0, min(MX1, mask_w)); MX2 = max(0, min(MX2, mask_w))
-    MY1 = max(0, min(MY1, mask_h)); MY2 = max(0, min(MY2, mask_h))
+    MX1 = X1 - mask_left
+    MY1 = Y1 - mask_top
+    MX2 = MX1 + (X2 - X1)
+    MY2 = MY1 + (Y2 - Y1)
+    MX1 = max(0, min(MX1, mask_w))
+    MX2 = max(0, min(MX2, mask_w))
+    MY1 = max(0, min(MY1, mask_h))
+    MY2 = max(0, min(MY2, mask_h))
     return (X1, X2, Y1, Y2, MX1, MX2, MY1, MY2)
 
 
-# =========================
-# Цвет мазка и применение/оценка
-# =========================
+# -------------------------
+# Stroke color / blend / evaluation
+# -------------------------
 def choose_color_from_target(roi_target: np.ndarray, weight_mask_2d: np.ndarray) -> np.ndarray:
     s = float(np.sum(weight_mask_2d))
     if s <= 1e-8:
@@ -265,8 +207,13 @@ def choose_color_from_target(roi_target: np.ndarray, weight_mask_2d: np.ndarray)
     return (num / s).astype(np.float32)
 
 
-def build_weight_mask(mask_roi: np.ndarray, use_soft_edges: bool, mask_threshold: float,
-                      use_alpha: bool, alpha_value: float) -> Tuple[np.ndarray, np.ndarray]:
+def build_weight_mask(
+    mask_roi: np.ndarray,
+    use_soft_edges: bool,
+    mask_threshold: float,
+    use_alpha: bool,
+    alpha_value: float,
+) -> Tuple[np.ndarray, np.ndarray]:
     if use_soft_edges:
         m = np.clip(mask_roi, 0.0, 1.0).astype(np.float32)
     else:
@@ -276,9 +223,17 @@ def build_weight_mask(mask_roi: np.ndarray, use_soft_edges: bool, mask_threshold
 
 
 def try_one_stroke(
-    canvas: np.ndarray, target: np.ndarray, brush: np.ndarray,
-    x_center: int, y_center: int, block_size: int, angle_deg: float,
-    use_soft_edges: bool, mask_threshold: float, use_alpha: bool, alpha_value: float
+    canvas: np.ndarray,
+    target: np.ndarray,
+    brush: np.ndarray,
+    x_center: int,
+    y_center: int,
+    block_size: int,
+    angle_deg: float,
+    use_soft_edges: bool,
+    mask_threshold: float,
+    use_alpha: bool,
+    alpha_value: float,
 ) -> Tuple[bool, Optional[Tuple], float]:
     H, W, _ = canvas.shape
     mask = scale_and_rotate_mask(brush, block_size, angle_deg)
@@ -321,11 +276,16 @@ def commit_payload(canvas: np.ndarray, err_map: np.ndarray, target: np.ndarray, 
     err_map[Y1:Y2, X1:X2] = mse_per_pixel(new_roi, roi_target)
 
 
-# =========================
-# Выбор центра по карте ошибки (+ cooldown)
-# =========================
-def select_roi_center(err_map: np.ndarray, sel_weight: Optional[np.ndarray], method: str,
-                      topk: int, rng: np.random.Generator) -> Tuple[int, int]:
+# -------------------------
+# ROI selection (+ cooldown)
+# -------------------------
+def select_roi_center(
+    err_map: np.ndarray,
+    sel_weight: Optional[np.ndarray],
+    method: str,
+    topk: int,
+    rng: np.random.Generator,
+) -> Tuple[int, int]:
     weighted = err_map if sel_weight is None else err_map * sel_weight
     H, W = weighted.shape
     if method == "argmax":
@@ -361,9 +321,9 @@ def recover_cooldown(sel_weight: Optional[np.ndarray], cfg: Config):
     np.clip(sel_weight, cfg.cooldown_min, cfg.cooldown_max, out=sel_weight)
 
 
-# =========================
-# Лестница размеров (строго крупн→мелк)
-# =========================
+# -------------------------
+# Size ladder (strict large→small)
+# -------------------------
 def make_all_sizes(cfg: Config, W: int, H: int) -> List[int]:
     s_max = max(cfg.smallest_px, int(round(min(W, H) * cfg.largest_frac)))
     s_min = max(1, int(cfg.smallest_px))
@@ -377,9 +337,9 @@ def make_all_sizes(cfg: Config, W: int, H: int) -> List[int]:
     return [max(s_min, s) for s in sizes]
 
 
-# =========================
-# Постобработка видео: плавная скорость (замена файла)
-# =========================
+# -------------------------
+# Video postprocess: smooth speed ramp (in-place replace)
+# -------------------------
 def _smoothstep(x: float) -> float:
     x = max(0.0, min(1.0, x))
     return x * x * (3 - 2 * x)
@@ -394,22 +354,26 @@ def _get_duration_seconds(path: str) -> float:
     dur = meta.get("duration")
     if dur and dur > 0:
         return float(dur)
-    fps = meta.get("fps"); nframes = meta.get("nframes")
+    fps = meta.get("fps")
+    nframes = meta.get("nframes")
     if fps and nframes and fps > 0:
         return float(nframes) / float(fps)
-    raise RuntimeError("Не удалось определить длительность видео")
+    raise RuntimeError("Cannot determine video duration")
 
 
 def _has_audio_track(path: str, ffmpeg_bin: str) -> bool:
     proc = subprocess.run(
         [ffmpeg_bin, "-hide_banner", "-i", path],
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
     )
     return "Audio:" in proc.stderr
 
 
 def _clamp_segments(total: float, slow_sec: float, fast_sec: float, margin: float = 0.02):
-    slow_sec = max(0.0, slow_sec); fast_sec = max(0.0, fast_sec)
+    slow_sec = max(0.0, slow_sec)
+    fast_sec = max(0.0, fast_sec)
     if slow_sec + fast_sec <= max(0.0, total - margin):
         return slow_sec, fast_sec
     if total <= margin:
@@ -419,12 +383,14 @@ def _clamp_segments(total: float, slow_sec: float, fast_sec: float, margin: floa
 
 
 def _atempo_chain_str(speed: float) -> str:
-    """Возвращает строку типа 'atempo=2.0,atempo=1.5' для произвольного speed."""
+    """
+    Build an atempo chain for arbitrary speed factor
+    (ffmpeg supports 0.5..2.0 per filter, so we compose).
+    """
     chain: List[str] = []
     s = float(speed)
     if abs(s - 1.0) < 1e-6:
-        return ""  # без изменения
-    # разложение >2.0 и <0.5 на допустимые шаги
+        return ""
     while s > 2.0 + 1e-9:
         chain.append("atempo=2.0")
         s /= 2.0
@@ -449,13 +415,17 @@ def _build_filter_complex(
 
     def add_segment(t1, t2, speed, tag):
         v_label = f"[v{tag}]"
-        lines.append(f"[{vin}]trim=start={t1:.6f}:end={t2:.6f},setpts=PTS-STARTPTS,setpts=PTS/{speed:.6f}{v_label}")
+        lines.append(
+            f"[{vin}]trim=start={t1:.6f}:end={t2:.6f},setpts=PTS-STARTPTS,setpts=PTS/{speed:.6f}{v_label}"
+        )
         parts_v.append(v_label)
         if with_audio:
             a_label = f"[a{tag}]"
             chain = _atempo_chain_str(speed)
             if chain:
-                lines.append(f"[{ain}]atrim=start={t1:.6f}:end={t2:.6f},asetpts=PTS-STARTPTS,{chain}{a_label}")
+                lines.append(
+                    f"[{ain}]atrim=start={t1:.6f}:end={t2:.6f},asetpts=PTS-STARTPTS,{chain}{a_label}"
+                )
             else:
                 lines.append(f"[{ain}]atrim=start={t1:.6f}:end={t2:.6f},asetpts=PTS-STARTPTS{a_label}")
             parts_a.append(a_label)
@@ -464,7 +434,8 @@ def _build_filter_complex(
     if slow_sec > 1e-6:
         dt = slow_sec / steps
         for i in range(steps):
-            t1 = i * dt; t2 = (i + 1) * dt
+            t1 = i * dt
+            t2 = (i + 1) * dt
             u = i / (steps - 1) if steps > 1 else 1.0
             s = slow_from + (1.0 - slow_from) * _smoothstep(u)
             add_segment(t1, t2, s, f"s{i}")
@@ -485,17 +456,18 @@ def _build_filter_complex(
         dt = fast_sec / steps
         base = duration - fast_sec
         for i in range(steps):
-            t1 = base + i * dt; t2 = base + (i + 1) * dt
+            t1 = base + i * dt
+            t2 = base + (i + 1) * dt
             u = i / (steps - 1) if steps > 1 else 1.0
             s = 1.0 + (fast_to - 1.0) * _smoothstep(u)
             add_segment(t1, t2, s, f"f{i}")
 
     n = len(parts_v)
     if n == 0:
-        raise RuntimeError("Пустой набор сегментов для concat")
+        raise RuntimeError("Empty segment set for concat")
     if with_audio:
         if len(parts_v) != len(parts_a):
-            raise RuntimeError("Несовпадение числа видео- и аудиосегментов")
+            raise RuntimeError("Video/audio segments count mismatch")
         interleaved = []
         for v, a in zip(parts_v, parts_a):
             interleaved.extend([v, a])
@@ -517,7 +489,7 @@ def postprocess_video_speed_replace(
     slow_from: float,
     fast_to: float,
 ) -> str:
-    """Делает плавный speed-ramp и ЗАМЕНЯЕТ input_path (через временный файл)."""
+    """Apply a smooth speed ramp and replace the original file in-place."""
     ffmpeg_bin = imageio_ffmpeg.get_ffmpeg_exe()
     duration = _get_duration_seconds(input_path)
     slow_sec, fast_sec = _clamp_segments(duration, slow_seconds, fast_seconds)
@@ -533,15 +505,29 @@ def postprocess_video_speed_replace(
         fast_to=fast_to,
     )
 
-    # временный файл рядом с исходным
     base, ext = os.path.splitext(input_path)
     tmp_out = f"{base}.speedtmp{ext}"
 
     cmd = [
-        ffmpeg_bin, "-y", "-hide_banner", "-loglevel", "error",
-        "-i", input_path,
-        "-filter_complex", filter_complex,
-        "-map", vout, "-c:v", "libx264", "-preset", preset, "-crf", str(crf), "-pix_fmt", "yuv420p",
+        ffmpeg_bin,
+        "-y",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-i",
+        input_path,
+        "-filter_complex",
+        filter_complex,
+        "-map",
+        vout,
+        "-c:v",
+        "libx264",
+        "-preset",
+        preset,
+        "-crf",
+        str(crf),
+        "-pix_fmt",
+        "yuv420p",
     ]
     if fps:
         cmd += ["-r", str(fps)]
@@ -553,41 +539,40 @@ def postprocess_video_speed_replace(
 
     subprocess.run(cmd, check=True)
 
-    # заменить исходник
     os.replace(tmp_out, input_path)
     return input_path
 
 
-# =========================
-# Основной процесс
-# =========================
+# -------------------------
+# Main pipeline
+# -------------------------
 def main(cfg: Config) -> None:
     rng = np.random.default_rng(cfg.seed)
 
-    # загрузка
+    # Load target and initialize canvas
     target = load_image_rgb01(cfg.input_image_path, cfg.max_size)
     H, W, _ = target.shape
     start_rgb = hex_to_rgb01(cfg.start_color_hex)
     canvas = np.ones_like(target, dtype=np.float32) * start_rgb
     brushes = load_brushes_gray01(cfg.brush_paths)
 
-    # начальная ошибка и карты
+    # Error map and selection weights
     err_map = mse_per_pixel(canvas, target)
     sel_weight = np.ones_like(err_map, dtype=np.float32) if cfg.use_cooldown else None
 
-    # лестница размеров (крупн->мелк), СТРОГО ПО ФАЗАМ
+    # Size schedule (strict phases)
     sizes = make_all_sizes(cfg, W, H)
     current_level = 0
     current_size = sizes[current_level]
 
-    # ориентация (один раз)
+    # Orientation precomputation
     if cfg.orientation_mode == "gradient":
         gray = rgb_to_gray01(target)
         Ix, Iy = simple_central_gradients(gray)
     else:
         Ix = Iy = None
 
-    # видео подготовка
+    # Video writer setup
     writer = None
     video_path_final = None
     if cfg.make_video:
@@ -600,7 +585,6 @@ def main(cfg: Config) -> None:
         video_path_final = unique_path(cfg.output_video_path)
         writer = imageio.get_writer(video_path_final, fps=cfg.video_fps)
 
-    # счётчики фазы
     attempts_in_phase = 0
     accept_window: Deque[int] = deque(maxlen=cfg.phase_accept_window)
 
@@ -610,29 +594,39 @@ def main(cfg: Config) -> None:
 
     phase_max_attempts = phase_max_attempts_for(current_size)
 
-    # основной цикл
     global_step = 0
     pbar = tqdm(total=cfg.total_strokes, desc="Painting", ncols=80)
     try:
         for _ in range(cfg.total_strokes):
             recover_cooldown(sel_weight, cfg)
 
-            # центр
+            # Pick center
             y, x = select_roi_center(err_map, sel_weight, cfg.roi_sampling, cfg.topk, rng)
 
-            # угол под текущий размер
+            # Angle at current size
             if cfg.orientation_mode == "gradient":
-                angle = local_gradient_angle_deg(Ix, Iy, x, y, current_size, rng, cfg.grad_min_strength, cfg.angle_jitter_deg)
+                angle = local_gradient_angle_deg(
+                    Ix, Iy, x, y, current_size, rng, cfg.grad_min_strength, cfg.angle_jitter_deg
+                )
             elif cfg.orientation_mode == "random":
                 angle = float(rng.uniform(0.0, 180.0))
             else:
                 angle = 0.0
 
-            # попытка мазка ТЕКУЩЕГО размера
+            # Try a stroke
             brush = brushes[int(rng.integers(0, len(brushes)))]
             accepted, payload, _gain_pp = try_one_stroke(
-                canvas, target, brush, x, y, current_size, angle,
-                cfg.use_soft_edges, cfg.mask_threshold, cfg.use_alpha, cfg.alpha_value
+                canvas,
+                target,
+                brush,
+                x,
+                y,
+                current_size,
+                angle,
+                cfg.use_soft_edges,
+                cfg.mask_threshold,
+                cfg.use_alpha,
+                cfg.alpha_value,
             )
             attempts_in_phase += 1
             accept_window.append(1 if accepted else 0)
@@ -644,11 +638,11 @@ def main(cfg: Config) -> None:
             global_step += 1
             pbar.update(1)
 
-            # кадр в видео
+            # Write frame
             if writer is not None and (global_step % save_every == 0):
                 writer.append_data(np.clip(canvas * 255.0, 0, 255).astype(np.uint8))
 
-            # переход на меньший размер
+            # Phase transition
             move_down = False
             if attempts_in_phase >= cfg.phase_min_strokes:
                 if len(accept_window) >= min(cfg.phase_accept_window, cfg.phase_min_strokes):
@@ -667,22 +661,22 @@ def main(cfg: Config) -> None:
                 if sel_weight is not None:
                     sel_weight.fill(1.0)
 
-            # стоп по ошибке
+            # Early stop by target MSE
             if cfg.target_mse is not None and float(np.mean(err_map)) <= cfg.target_mse:
                 break
     finally:
         pbar.close()
 
-    # финальные сохранения
+    # Save final image
     img_path = save_image_rgb01(cfg.output_final_image_path, canvas)
 
+    # Finalize video and apply speed ramp (in-place)
     if writer is not None and video_path_final:
         last = np.clip(canvas * 255.0, 0, 255).astype(np.uint8)
         for _ in range(max(0, cfg.record_last_hold_frames)):
             writer.append_data(last)
         writer.close()
 
-        # постобработка скорости — ЗАМЕНА исходного видео
         if cfg.postprocess_speed:
             try:
                 postprocess_video_speed_replace(
@@ -699,7 +693,7 @@ def main(cfg: Config) -> None:
             except Exception as e:
                 print(f"[warn] speed postprocess failed: {e}")
 
-    # краткая сводка
+    # Summary
     if writer is not None and video_path_final:
         print(f"Done. Image: {img_path} | Video: {video_path_final}")
     else:
