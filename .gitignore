@@ -1,19 +1,37 @@
-# ---- Python / IDE / OS ----
+# ---- Python / build / venv ----
 __pycache__/
 *.py[cod]
 *.pyo
 *.pyd
+*.pyi
 .venv/
 venv/
 .env
 .env.*
 *.egg-info/
+.eggs/
 dist/
 build/
+.nox/
+.tox/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+
+# ---- IDE / OS ----
 .idea/
 .vscode/
 .DS_Store
 Thumbs.db
+
+# ---- Logs & profiling ----
+logs/
+*.log
+profile-*
+*.prof
+*.bak
 
 # ---- Project media ----
 # входные картинки не коммитим
@@ -21,8 +39,7 @@ assets/input/**
 
 # артефакты рендеров/экспортов не коммитим
 outputs/**
-
-# если нужны пустые папки outputs/* в репо — добавь .gitkeep
+# если нужны пустые папки outputs/* в репо — держим .gitkeep
 !outputs/.gitkeep
 !outputs/images/.gitkeep
 !outputs/video/.gitkeep
@@ -35,5 +52,16 @@ outputs/**
 *.mkv
 *.webm
 
+# но разрешаем демо-медиа в документации
+!docs/media/*.mp4
+!docs/media/*.webm
+!docs/media/*.gif
+!docs/media/*.png
+!docs/media/*.jpg
+!docs/media/*.jpeg
+
+# временные артефакты ffmpeg
+*.speedtmp.*
+
 # (кисть оставляем — папка brushes не игнорируется)
-# assets/brushes/brush.png будет отслеживаться
+# assets/brushes/** отслеживается
