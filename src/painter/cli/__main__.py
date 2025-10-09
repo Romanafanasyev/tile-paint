@@ -13,25 +13,16 @@ PRESETS: Dict[str, Dict[str, Any]] = {
         "workload_scale": 4,          # ~4k strokes
         "make_video": True,
         "max_size": 640,
-        "video_fps": 30,
-        "save_every_n_strokes": 10,
-        "use_soft_edges": True,
     },
     "balanced": {
-        "workload_scale": 12,         # ~12k strokes
-        "make_video": True,
-        "max_size": 768,
-        "video_fps": 30,
-        "save_every_n_strokes": 15,
-        "use_soft_edges": True,
-    },
-    "quality": {
         "workload_scale": 25,         # ~25k strokes
         "make_video": True,
         "max_size": 0,                # full-res
-        "video_fps": 30,
-        "save_every_n_strokes": 20,
-        "use_soft_edges": True,
+    },
+    "quality": {
+        "workload_scale": 60,         # ~60k strokes
+        "make_video": True,
+        "max_size": 0,                # full-res
     },
 }
 
