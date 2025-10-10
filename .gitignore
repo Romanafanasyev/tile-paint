@@ -34,18 +34,14 @@ profile-*
 *.bak
 
 # ---- Project media ----
-# входные картинки не коммитим
 assets/input/**
 
-# артефакты рендеров/экспортов не коммитим
 outputs/**
-# если нужны пустые папки outputs/* в репо — держим .gitkeep
 !outputs/.gitkeep
 !outputs/images/.gitkeep
 !outputs/video/.gitkeep
 !assets/input/.gitkeep
 
-# видеофайлы не коммитим (глобально)
 *.mp4
 *.m4v
 *.mov
@@ -53,7 +49,6 @@ outputs/**
 *.mkv
 *.webm
 
-# но разрешаем демо-медиа в документации
 !docs/media/*.mp4
 !docs/media/*.webm
 !docs/media/*.gif
@@ -61,8 +56,6 @@ outputs/**
 !docs/media/*.jpg
 !docs/media/*.jpeg
 
-# временные артефакты ffmpeg
 *.speedtmp.*
 
-# (кисть оставляем — папка brushes не игнорируется)
 # assets/brushes/** отслеживается
