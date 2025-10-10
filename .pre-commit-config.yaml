@@ -16,6 +16,8 @@ repos:
     rev: v1.11.2
     hooks:
       - id: mypy
+        args: ["--config-file=pyproject.toml", "src/painter"]
+        pass_filenames: false
         additional_dependencies: []
 
   - repo: local
@@ -23,11 +25,17 @@ repos:
       - id: pytest-smoke
         name: pytest-smoke
         language: python
-        entry: python -c "import sys,pytest; code=pytest.main(['-q']); sys.exit(0 if code in (0,5) else code)"
-        types: [python]
-        pass_filenames: false
         additional_dependencies:
           - pytest==8.3.3
+          - pytest-timeout==2.3.1
+          - numpy==2.1.1
+          - pillow==10.4.0
+          - imageio==2.35.1
+          - imageio-ffmpeg==0.5.1
+          - tqdm==4.66.4
+        entry: python -c "import sys,pytest; code=pytest.main(['-q']); sys.exit(0 if code in (0,5) else code)"
+        types: [ python ]
+        pass_filenames: false
 
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v4.6.0

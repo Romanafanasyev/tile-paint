@@ -44,7 +44,7 @@ def save_image_rgb01(path: str, img: np.ndarray) -> str:
     ensure_dir_for(path)
     path2 = unique_path(path)
     img8 = np.clip(img * 255.0, 0, 255).astype(np.uint8)
-    Image.fromarray(img8, mode="RGB").save(path2)
+    Image.fromarray(img8).save(path2)
     return path2
 
 

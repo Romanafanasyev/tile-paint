@@ -61,7 +61,8 @@ def _atempo_chain_str(speed: float) -> str:
     while s < 0.5 - 1e-9:
         chain.append("atempo=0.5")
         s /= 0.5
-    chain.append(f"atempo={s:.6f}")
+    residual = f"{s:.6f}".rstrip("0").rstrip(".")
+    chain.append(f"atempo={residual}")
     return ",".join(chain)
 
 

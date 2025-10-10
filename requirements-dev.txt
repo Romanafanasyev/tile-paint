@@ -3,3 +3,4 @@ ruff==0.6.8
 mypy==1.11.2
 pytest==8.3.3
 isort==5.13.2
+pytest-timeout==2.3.1

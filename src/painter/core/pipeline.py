@@ -100,6 +100,10 @@ def main(cfg: Config) -> None:
         logger.info(f"Done | image={img_path} mse={final_mse:.6g}")
 
 
+def run_pipeline(cfg: Config) -> None:
+    main(cfg)
+
+
 if __name__ == "__main__":
     cfg = Config()
     main(cfg)
