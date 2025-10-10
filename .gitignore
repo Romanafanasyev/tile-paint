@@ -35,6 +35,11 @@ profile-*
 
 # ---- Project media ----
 assets/input/**
+!assets/input/cat.jpg
+!assets/input/grad.jpeg
+!assets/input/lines.jpg
+!assets/input/lion.jpg
+!assets/input/sky.jpg
 
 outputs/**
 !outputs/.gitkeep
