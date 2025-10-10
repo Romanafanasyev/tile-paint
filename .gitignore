@@ -43,6 +43,7 @@ outputs/**
 !outputs/.gitkeep
 !outputs/images/.gitkeep
 !outputs/video/.gitkeep
+!assets/input/.gitkeep
 
 # видеофайлы не коммитим (глобально)
 *.mp4
