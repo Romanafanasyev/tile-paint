@@ -9,7 +9,7 @@ class Config:
     """
 
     # --- I/O (paths are relative to the src/ folder by design) ---
-    input_image_path: str = "../assets/input/volna.jpg"  # PNG/JPG
+    input_image_path: str = "../assets/input/sky.jpg"  # PNG/JPG
     output_final_image_path: str = "../outputs/images/final.png"
     make_video: bool = True
     output_video_path: str = "../outputs/video/out.mp4"
