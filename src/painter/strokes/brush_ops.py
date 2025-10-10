@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Tuple
+
 import numpy as np
 from PIL import Image
 
@@ -11,6 +11,7 @@ class Brush:
     """
     Immutable brush: holds a grayscale mask in [0,1], where white=paint, black=skip.
     """
+
     mask01: np.ndarray  # 2D float32 array, values in [0,1]
 
     def render(self, target_box_size: int, angle_deg: float) -> np.ndarray:
@@ -25,9 +26,11 @@ class Brush:
         new_w = max(1, int(round(wb * scale)))
 
         img = Image.fromarray((mask * 255.0).astype(np.uint8))
-        img = img.resize((new_w, new_h), resample=Image.BILINEAR)
+        img = img.resize((new_w, new_h), resample=Image.Resampling.BILINEAR)
         if abs(angle_deg) > 1e-6:
-            img = img.rotate(angle_deg, resample=Image.BILINEAR, expand=True, fillcolor=0)
+            img = img.rotate(
+                angle_deg, resample=Image.Resampling.BILINEAR, expand=True, fillcolor=0
+            )
         return np.asarray(img, dtype=np.float32) / 255.0
 
 
@@ -37,7 +40,7 @@ def build_weight_mask(
     mask_threshold: float,
     use_alpha: bool,
     alpha_value: float,
-) -> Tuple[np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray]:
     """
     From a cropped brush mask (ROI), build:
       - m:   binary/soft coverage mask in [0,1]

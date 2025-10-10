@@ -1,5 +1,4 @@
 import os
-from typing import List
 
 import numpy as np
 from PIL import Image
@@ -36,7 +35,7 @@ def load_image_rgb01(path: str, max_size: int = 0) -> np.ndarray:
         else:
             new_h = max_size
             new_w = int(round(w * (max_size / h)))
-        im = im.resize((new_w, new_h), Image.LANCZOS)
+        im = im.resize((new_w, new_h), Image.Resampling.LANCZOS)
     return np.asarray(im, dtype=np.float32) / 255.0
 
 
@@ -49,12 +48,12 @@ def save_image_rgb01(path: str, img: np.ndarray) -> str:
     return path2
 
 
-def load_brushes(paths: List[str]) -> List[Brush]:
+def load_brushes(paths: list[str]) -> list[Brush]:
     """
     Load grayscale brush masks from given files and wrap them into Brush objects.
     White=paint, black=skip.
     """
-    out: List[Brush] = []
+    out: list[Brush] = []
     for p in paths:
         if not os.path.exists(p):
             raise FileNotFoundError(f"Brush file not found: {p}")
@@ -66,6 +65,6 @@ def load_brushes(paths: List[str]) -> List[Brush]:
 
 
 # Backward-compatible helper (if ever needed elsewhere)
-def load_brushes_gray01(paths: List[str]) -> List[np.ndarray]:
+def load_brushes_gray01(paths: list[str]) -> list[np.ndarray]:
     """Legacy: load raw grayscale masks as 2D float arrays in [0,1]. Prefer load_brushes()."""
     return [b.mask01 for b in load_brushes(paths)]

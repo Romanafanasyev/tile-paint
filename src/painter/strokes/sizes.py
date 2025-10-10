@@ -1,8 +1,7 @@
-from typing import List
 from painter.config.config import Config
 
 
-def make_all_sizes(cfg: Config, W: int, H: int) -> List[int]:
+def make_all_sizes(cfg: Config, W: int, H: int) -> list[int]:
     """
     Build a strictly decreasing list of stroke box sizes (large → small),
     deduplicated and clamped to [smallest_px, ...].

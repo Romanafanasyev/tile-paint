@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import Optional, Tuple
-
 
 def overlap_mask_and_frame(
     cx: int,
@@ -10,7 +8,7 @@ def overlap_mask_and_frame(
     mask_h: int,
     W: int,
     H: int,
-) -> Optional[Tuple[int, int, int, int, int, int, int, int]]:
+) -> tuple[int, int, int, int, int, int, int, int] | None:
     """Canvas/mask overlap indices for placing a mask centered at (cx, cy)."""
     mask_left = cx - mask_w // 2
     mask_top = cy - mask_h // 2

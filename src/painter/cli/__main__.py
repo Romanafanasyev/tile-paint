@@ -1,29 +1,28 @@
 from __future__ import annotations
 
 import argparse
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from painter.config.config import Config
 from painter.core import pipeline
 from painter.logger.logger import configure_logging
 
-
 # TODO: tune actual values for these presets
-PRESETS: Dict[str, Dict[str, Any]] = {
+PRESETS: dict[str, dict[str, Any]] = {
     "fast": {
-        "workload_scale": 4,          # ~4k strokes
+        "workload_scale": 4,  # ~4k strokes
         "make_video": True,
         "max_size": 640,
     },
     "balanced": {
-        "workload_scale": 25,         # ~25k strokes
+        "workload_scale": 25,  # ~25k strokes
         "make_video": True,
-        "max_size": 0,                # full-res
+        "max_size": 0,  # full-res
     },
     "quality": {
-        "workload_scale": 60,         # ~60k strokes
+        "workload_scale": 60,  # ~60k strokes
         "make_video": True,
-        "max_size": 0,                # full-res
+        "max_size": 0,  # full-res
     },
 }
 
@@ -52,8 +51,18 @@ def _build_parser() -> argparse.ArgumentParser:
 
     # Paths (relative to src/ or absolute)
     p.add_argument("--input", dest="input_image_path", default=None, help="Input PNG/JPG path.")
-    p.add_argument("--out-image", dest="output_final_image_path", default=None, help="Output image path (auto _1/_2 suffix if exists).")
-    p.add_argument("--out-video", dest="output_video_path", default=None, help="Output video path (auto _1/_2 suffix if exists).")
+    p.add_argument(
+        "--out-image",
+        dest="output_final_image_path",
+        default=None,
+        help="Output image path (auto _1/_2 suffix if exists).",
+    )
+    p.add_argument(
+        "--out-video",
+        dest="output_video_path",
+        default=None,
+        help="Output video path (auto _1/_2 suffix if exists).",
+    )
 
     # Brushes (list)
     p.add_argument(
@@ -72,12 +81,22 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Thousands of strokes (1 -> ~1000). Also sets total_strokes, speed_fast_seconds, speed_fast_to.",
     )
-    p.add_argument("--make-video", dest="make_video", action="store_true", help="Enable video recording.")
-    p.add_argument("--no-video", dest="make_video", action="store_false", help="Disable video recording.")
+    p.add_argument(
+        "--make-video", dest="make_video", action="store_true", help="Enable video recording."
+    )
+    p.add_argument(
+        "--no-video", dest="make_video", action="store_false", help="Disable video recording."
+    )
     p.set_defaults(make_video=None)
 
     # Video cadence
-    p.add_argument("--video-fps", dest="video_fps", type=int, default=None, help="Video FPS (frames per second).")
+    p.add_argument(
+        "--video-fps",
+        dest="video_fps",
+        type=int,
+        default=None,
+        help="Video FPS (frames per second).",
+    )
     p.add_argument(
         "--save-every",
         dest="save_every_n_strokes",
@@ -94,16 +113,48 @@ def _build_parser() -> argparse.ArgumentParser:
     )
 
     # Input resize
-    p.add_argument("--max-size", dest="max_size", type=int, default=None, help="Resize longer image side to N px (0 keeps original).")
+    p.add_argument(
+        "--max-size",
+        dest="max_size",
+        type=int,
+        default=None,
+        help="Resize longer image side to N px (0 keeps original).",
+    )
 
     # Quality target
-    p.add_argument("--target-mse", dest="target_mse", type=float, default=None, help="Early stop when global MSE <= value (disabled if omitted).")
+    p.add_argument(
+        "--target-mse",
+        dest="target_mse",
+        type=float,
+        default=None,
+        help="Early stop when global MSE <= value (disabled if omitted).",
+    )
 
     # Size schedule
-    p.add_argument("--size-scale-mode", dest="size_scale_mode", choices=["log", "linear"], default=None, help="Brush size schedule: logarithmic or linear.")
-    p.add_argument("--levels", dest="levels", type=int, default=None, help="Number of size phases (>= 2).")
-    p.add_argument("--largest-frac", dest="largest_frac", type=float, default=None, help="Largest brush box = fraction of min(H, W).")
-    p.add_argument("--smallest-px", dest="smallest_px", type=int, default=None, help="Smallest brush box in pixels (>= 1).")
+    p.add_argument(
+        "--size-scale-mode",
+        dest="size_scale_mode",
+        choices=["log", "linear"],
+        default=None,
+        help="Brush size schedule: logarithmic or linear.",
+    )
+    p.add_argument(
+        "--levels", dest="levels", type=int, default=None, help="Number of size phases (>= 2)."
+    )
+    p.add_argument(
+        "--largest-frac",
+        dest="largest_frac",
+        type=float,
+        default=None,
+        help="Largest brush box = fraction of min(H, W).",
+    )
+    p.add_argument(
+        "--smallest-px",
+        dest="smallest_px",
+        type=int,
+        default=None,
+        help="Smallest brush box in pixels (>= 1).",
+    )
 
     # ROI sampling
     p.add_argument(
@@ -115,33 +166,72 @@ def _build_parser() -> argparse.ArgumentParser:
     )
 
     # Canvas & brush behavior
-    p.add_argument("--start-color-hex", dest="start_color_hex", default=None, help="Initial canvas color in HEX, e.g. #FFFFFF.")
-    p.add_argument("--use-soft-edges", dest="use_soft_edges", action="store_true", help="Treat brush grayscale as soft alpha.")
-    p.add_argument("--no-soft-edges", dest="use_soft_edges", action="store_false", help="Use hard edges (thresholded mask).")
+    p.add_argument(
+        "--start-color-hex",
+        dest="start_color_hex",
+        default=None,
+        help="Initial canvas color in HEX, e.g. #FFFFFF.",
+    )
+    p.add_argument(
+        "--use-soft-edges",
+        dest="use_soft_edges",
+        action="store_true",
+        help="Treat brush grayscale as soft alpha.",
+    )
+    p.add_argument(
+        "--no-soft-edges",
+        dest="use_soft_edges",
+        action="store_false",
+        help="Use hard edges (thresholded mask).",
+    )
     p.set_defaults(use_soft_edges=None)
-    p.add_argument("--mask-threshold", dest="mask_threshold", type=float, default=None, help="Binary threshold for hard edges (0..1).")
-    p.add_argument("--use-alpha", dest="use_alpha", action="store_true", help="Apply global alpha multiplier to brush.")
-    p.add_argument("--no-alpha", dest="use_alpha", action="store_false", help="Disable global alpha multiplier.")
+    p.add_argument(
+        "--mask-threshold",
+        dest="mask_threshold",
+        type=float,
+        default=None,
+        help="Binary threshold for hard edges (0..1).",
+    )
+    p.add_argument(
+        "--use-alpha",
+        dest="use_alpha",
+        action="store_true",
+        help="Apply global alpha multiplier to brush.",
+    )
+    p.add_argument(
+        "--no-alpha",
+        dest="use_alpha",
+        action="store_false",
+        help="Disable global alpha multiplier.",
+    )
     p.set_defaults(use_alpha=None)
-    p.add_argument("--alpha-value", dest="alpha_value", type=float, default=None, help="Global alpha value in [0..1] when --use-alpha is set.")
+    p.add_argument(
+        "--alpha-value",
+        dest="alpha_value",
+        type=float,
+        default=None,
+        help="Global alpha value in [0..1] when --use-alpha is set.",
+    )
 
     # Determinism
-    p.add_argument("--seed", dest="seed", type=int, default=None, help="Random seed for reproducibility.")
+    p.add_argument(
+        "--seed", dest="seed", type=int, default=None, help="Random seed for reproducibility."
+    )
 
     return p
 
 
-def _normalize_brush_list(v: Optional[List[str]]) -> Optional[List[str]]:
+def _normalize_brush_list(v: list[str] | None) -> list[str] | None:
     if not v:
         return None
-    out: List[str] = []
+    out: list[str] = []
     for item in v:
         parts = [s.strip() for s in item.split(",")] if "," in item else [item.strip()]
         out.extend([p for p in parts if p])
     return out or None
 
 
-def _apply_workload_derivatives(overrides: Dict[str, Any], ws: int) -> None:
+def _apply_workload_derivatives(overrides: dict[str, Any], ws: int) -> None:
     overrides["workload_scale"] = int(ws)
     overrides["total_strokes"] = int(1000 * ws)
     overrides["speed_fast_seconds"] = float(2.64 * ws)
@@ -153,7 +243,7 @@ def main() -> None:
     args = parser.parse_args()
     configure_logging(args.log_level)
 
-    overrides: Dict[str, Any] = {}
+    overrides: dict[str, Any] = {}
     if args.preset:
         overrides.update(PRESETS[args.preset])
 

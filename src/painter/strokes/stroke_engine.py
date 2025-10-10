@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import math
 from collections import deque
-from typing import Deque, List, Optional, Tuple
+from typing import cast
 
 import numpy as np
+from numpy.typing import NDArray
 
 from painter.config.config import Config
 from painter.imagemath.image_math import (
@@ -13,12 +14,11 @@ from painter.imagemath.image_math import (
     rgb_to_gray01,
     simple_central_gradients,
 )
+from painter.logger.logger import get_logger
 from painter.strokes.brush_ops import Brush, build_weight_mask
 from painter.strokes.geometry import overlap_mask_and_frame
 from painter.strokes.roi_selection import CooldownMap, select_roi_center
 from painter.strokes.sizes import make_all_sizes
-from painter.logger.logger import get_logger
-
 
 logger = get_logger(__name__)
 
@@ -60,14 +60,18 @@ def _local_gradient_angle_deg(
     return angle
 
 
-def _choose_color_from_target(roi_target: np.ndarray, cover_mask_2d: np.ndarray) -> np.ndarray:
+def _choose_color_from_target(
+    roi_target: NDArray[np.float32],
+    cover_mask_2d: NDArray[np.float32],
+) -> NDArray[np.float32]:
     """Weighted average RGB using coverage mask."""
     s = float(np.sum(cover_mask_2d))
     if s <= 1e-8:
-        return roi_target.mean(axis=(0, 1), dtype=np.float32)
+        col = roi_target.mean(axis=(0, 1), dtype=np.float32)
+        return cast(NDArray[np.float32], col)
     w3 = cover_mask_2d[..., None]
     num = (roi_target * w3).sum(axis=(0, 1))
-    return (num / s).astype(np.float32)
+    return cast(NDArray[np.float32], (num / s).astype(np.float32))
 
 
 class PainterEngine:
@@ -81,7 +85,7 @@ class PainterEngine:
         cfg: Config,
         target: np.ndarray,
         start_canvas: np.ndarray,
-        brushes: List[Brush],
+        brushes: list[Brush],
         cooldown: CooldownMap,
         rng: np.random.Generator,
     ) -> None:
@@ -98,15 +102,18 @@ class PainterEngine:
         self.sizes = make_all_sizes(cfg, W, H)
         self.level = 0
         self.size_px = self.sizes[self.level]
+        self.Ix: NDArray[np.float32] | None = None
+        self.Iy: NDArray[np.float32] | None = None
 
         if cfg.orientation_mode == "gradient":
             gray = rgb_to_gray01(target)
-            self.Ix, self.Iy = simple_central_gradients(gray)
+            gx, gy = simple_central_gradients(gray)
+            self.Ix, self.Iy = gx, gy
         else:
-            self.Ix = self.Iy = None
+            self.Ix, self.Iy = None, None
 
         self.attempts_in_phase = 0
-        self.accept_window: Deque[int] = deque(maxlen=cfg.phase_accept_window)
+        self.accept_window: deque[int] = deque(maxlen=cfg.phase_accept_window)
         self.phase_max_attempts = self._phase_max_attempts_for(self.size_px)
         self.global_step = 0
 
@@ -136,7 +143,7 @@ class PainterEngine:
         x_center: int,
         y_center: int,
         brush: Brush,
-    ) -> Tuple[bool, Optional[Tuple], float]:
+    ) -> tuple[bool, tuple | None, float]:
         H, W, _ = self.canvas.shape
         mask = brush.render(self.size_px, self._pick_angle(x_center, y_center))
         mh, mw = mask.shape
@@ -176,7 +183,7 @@ class PainterEngine:
             return True, payload, float(gain_pp)
         return False, None, 0.0
 
-    def _commit(self, payload: Tuple) -> None:
+    def _commit(self, payload: tuple) -> None:
         X1, X2, Y1, Y2, new_roi, _mask_roi = payload
         roi_target = self.target[Y1:Y2, X1:X2]
         self.canvas[Y1:Y2, X1:X2] = new_roi
@@ -200,7 +207,9 @@ class PainterEngine:
             self.accept_window.clear()
             self.phase_max_attempts = self._phase_max_attempts_for(self.size_px)
             self.cooldown.reset()
-            logger.debug(f"Phase -> size={self.size_px}px (level {self.level + 1}/{len(self.sizes)})")
+            logger.debug(
+                f"Phase -> size={self.size_px}px (level {self.level + 1}/{len(self.sizes)})"
+            )
 
     def step(self) -> bool:
         """

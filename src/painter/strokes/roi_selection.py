@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import Optional, Tuple
-
 import numpy as np
 
 
@@ -28,7 +26,7 @@ class CooldownMap:
 
     def __init__(
         self,
-        shape: Tuple[int, int],
+        shape: tuple[int, int],
         enabled: bool,
         min_val: float,
         max_val: float,
@@ -38,12 +36,10 @@ class CooldownMap:
         self._min = float(min_val)
         self._max = float(max_val)
         self._recover = float(recover_factor)
-        self._arr: Optional[np.ndarray] = (
-            np.ones(shape, dtype=np.float32) if self._enabled else None
-        )
+        self._arr: np.ndarray | None = np.ones(shape, dtype=np.float32) if self._enabled else None
 
     @property
-    def array(self) -> Optional[np.ndarray]:
+    def array(self) -> np.ndarray | None:
         """Underlying weight map or None when disabled."""
         return self._arr
 
@@ -62,7 +58,7 @@ class CooldownMap:
         np.multiply(self._arr, self._recover, out=self._arr)
         np.clip(self._arr, self._min, self._max, out=self._arr)
 
-    def apply_after_payload(self, payload: Tuple, cooldown_factor: float) -> None:
+    def apply_after_payload(self, payload: tuple, cooldown_factor: float) -> None:
         """
         Reduce weights inside the accepted stroke ROI.
 
@@ -80,17 +76,17 @@ class CooldownMap:
         X1, X2, Y1, Y2, _new_roi, mask_roi = payload
         m = (mask_roi > 0).astype(np.float32)
         block = self._arr[Y1:Y2, X1:X2]
-        block *= (1.0 - (1.0 - float(cooldown_factor)) * m)
+        block *= 1.0 - (1.0 - float(cooldown_factor)) * m
         np.clip(block, self._min, self._max, out=block)
 
 
 def select_roi_center(
     err_map: np.ndarray,
-    sel_weight: Optional[np.ndarray],
+    sel_weight: np.ndarray | None,
     method: str,
     topk: int,
     rng: np.random.Generator,
-) -> Tuple[int, int]:
+) -> tuple[int, int]:
     """
     Pick ROI center (y, x) using the error map, optionally weighted by a cooldown mask.
     """

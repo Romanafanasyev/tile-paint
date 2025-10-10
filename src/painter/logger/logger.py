@@ -1,24 +1,24 @@
 from __future__ import annotations
 
 import logging
-import sys
 import os
+import sys
 import warnings
 from logging.handlers import RotatingFileHandler
-from typing import Optional
+from types import TracebackType
 
 _LOGGER_NAME = "painter"
 _CONFIGURED = False
-_STREAM_H: Optional[logging.Handler] = None
-_FILE_H: Optional[logging.Handler] = None
+_STREAM_H: logging.Handler | None = None
+_FILE_H: logging.Handler | None = None
 
 
 class _ColorFormatter(logging.Formatter):
     COLORS = {
-        logging.DEBUG: "\x1b[36m",     # cyan
-        logging.INFO: "\x1b[32m",      # green
-        logging.WARNING: "\x1b[33m",   # yellow
-        logging.ERROR: "\x1b[31m",     # red
+        logging.DEBUG: "\x1b[36m",  # cyan
+        logging.INFO: "\x1b[32m",  # green
+        logging.WARNING: "\x1b[33m",  # yellow
+        logging.ERROR: "\x1b[31m",  # red
         logging.CRITICAL: "\x1b[35m",  # magenta
     }
     RESET = "\x1b[0m"
@@ -47,9 +47,10 @@ def _to_level(level: str) -> int:
 
 
 def _install_exception_hook(logger: logging.Logger) -> None:
-    def _hook(exc_type, exc, tb):
+    def _hook(exc_type: type[BaseException], exc: BaseException, tb: TracebackType | None) -> None:
         logger.critical("Uncaught exception", exc_info=(exc_type, exc, tb))
         sys.__excepthook__(exc_type, exc, tb)
+
     sys.excepthook = _hook
 
 
@@ -77,7 +78,9 @@ def configure_logging(
         _STREAM_H = logging.StreamHandler(stream=sys.stdout)
         _STREAM_H.setLevel(_to_level(level))
         _STREAM_H.setFormatter(
-            _ColorFormatter(fmt="%(asctime)s %(levelname)s %(name)s: %(message)s", datefmt="%H:%M:%S")
+            _ColorFormatter(
+                fmt="%(asctime)s %(levelname)s %(name)s: %(message)s", datefmt="%H:%M:%S"
+            )
         )
         logger.addHandler(_STREAM_H)
 
@@ -93,7 +96,9 @@ def configure_logging(
         )
         _FILE_H.setLevel(logging.DEBUG)
         _FILE_H.setFormatter(
-            logging.Formatter(fmt="%(asctime)s %(levelname)s %(name)s: %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
+            logging.Formatter(
+                fmt="%(asctime)s %(levelname)s %(name)s: %(message)s", datefmt="%Y-%m-%d %H:%M:%S"
+            )
         )
         logger.addHandler(_FILE_H)
 
@@ -108,6 +113,6 @@ def configure_logging(
             _STREAM_H.setLevel(_to_level(level))
 
 
-def get_logger(name: Optional[str] = None) -> logging.Logger:
+def get_logger(name: str | None = None) -> logging.Logger:
     full = _LOGGER_NAME if not name else f"{_LOGGER_NAME}.{name}"
     return logging.getLogger(full)

@@ -1,5 +1,4 @@
 from dataclasses import dataclass, field
-from typing import List, Optional
 
 
 @dataclass
@@ -10,15 +9,15 @@ class Config:
     """
 
     # --- I/O (paths are relative to the src/ folder by design) ---
-    input_image_path: str = "../assets/input/volna.jpg"        # PNG/JPG
+    input_image_path: str = "../assets/input/volna.jpg"  # PNG/JPG
     output_final_image_path: str = "../outputs/images/final.png"
     make_video: bool = True
     output_video_path: str = "../outputs/video/out.mp4"
     video_fps: int = 30
 
     # --- Video frame writing frequency (pick one) ---
-    save_every_n_strokes: Optional[int] = 10    # takes precedence if set
-    video_duration_sec: Optional[int] = 15      # used if save_every_n_strokes is None
+    save_every_n_strokes: int | None = 10  # takes precedence if set
+    video_duration_sec: int | None = 15  # used if save_every_n_strokes is None
 
     # --- Input image scaling (0 = keep original) ---
     max_size: int = 0
@@ -28,28 +27,28 @@ class Config:
 
     # --- Compute budget / quality ---
     total_strokes: int = 1000 * workload_scale
-    target_mse: Optional[float] = None          # e.g., 1e-3; None = disabled
+    target_mse: float | None = None  # e.g., 1e-3; None = disabled
 
     # --- Coarse->fine size schedule (strict phases; no size mixing) ---
-    size_scale_mode: str = "log"                # "log" | "linear"
+    size_scale_mode: str = "log"  # "log" | "linear"
     levels: int = 5
-    largest_frac: float = 0.35                  # s_max = largest_frac * min(H, W)
-    smallest_px: int = 10                       # lower bound (never 1px noise)
+    largest_frac: float = 0.35  # s_max = largest_frac * min(H, W)
+    smallest_px: int = 10  # lower bound (never 1px noise)
 
     # --- Phase transition rules (strictly go from large -> small) ---
-    phase_min_strokes: int = 100                # minimum attempts per phase
-    phase_accept_window: int = 120              # rolling window length
-    phase_accept_threshold: float = 0.05        # if accept-rate < threshold -> move down
-    phase_max_attempts_factor: float = 6.0      # ~factor * (H*W/size^2) attempts per phase
+    phase_min_strokes: int = 100  # minimum attempts per phase
+    phase_accept_window: int = 120  # rolling window length
+    phase_accept_threshold: float = 0.05  # if accept-rate < threshold -> move down
+    phase_max_attempts_factor: float = 6.0  # ~factor * (H*W/size^2) attempts per phase
 
     # --- Stroke center selection ---
-    roi_sampling: str = "topk_random"           # "argmax" | "topk_random"
+    roi_sampling: str = "topk_random"  # "argmax" | "topk_random"
     topk: int = 4096
 
     # --- Anti-sticking (selection weights; does NOT change true error) ---
     use_cooldown: bool = True
-    cooldown_factor: float = 0.6                # downweight after accepted stroke
-    cooldown_recover: float = 1.02              # multiplicative recovery per step
+    cooldown_factor: float = 0.6  # downweight after accepted stroke
+    cooldown_recover: float = 1.02  # multiplicative recovery per step
     cooldown_min: float = 0.25
     cooldown_max: float = 1.0
 
@@ -57,18 +56,18 @@ class Config:
     start_color_hex: str = "#FFFFFF"
 
     # --- Brushes (grayscale masks; white=paint, black=skip) ---
-    brush_paths: List[str] = field(default_factory=lambda: ["../assets/brushes/brush.png"])
-    use_soft_edges: bool = True                 # True: respect mask grayscale
-    mask_threshold: float = 0.5                 # used only if use_soft_edges=False
+    brush_paths: list[str] = field(default_factory=lambda: ["../assets/brushes/brush.png"])
+    use_soft_edges: bool = True  # True: respect mask grayscale
+    mask_threshold: float = 0.5  # used only if use_soft_edges=False
 
     # --- Orientation of strokes ---
-    orientation_mode: str = "gradient"          # "gradient" | "none" | "random"
-    grad_min_strength: float = 1e-6             # weak structure -> random angle
-    angle_jitter_deg: float = 0.0               # Gaussian jitter
+    orientation_mode: str = "gradient"  # "gradient" | "none" | "random"
+    grad_min_strength: float = 1e-6  # weak structure -> random angle
+    angle_jitter_deg: float = 0.0  # Gaussian jitter
 
     # --- Transparency of strokes ---
     use_alpha: bool = False
-    alpha_value: float = 0.25                   # 0..1; applied if use_alpha=True
+    alpha_value: float = 0.25  # 0..1; applied if use_alpha=True
 
     # --- Determinism ---
     seed: int = 42
@@ -88,7 +87,7 @@ class Config:
     speed_steps: int = 10
     speed_crf: int = 18
     speed_preset: str = "fast"
-    speed_fps: Optional[float] = None  # optionally force FPS (e.g., 30)
+    speed_fps: float | None = None  # optionally force FPS (e.g., 30)
 
     def __post_init__(self) -> None:
         # Basics
@@ -171,7 +170,14 @@ class Config:
         if self.speed_crf < 0:
             raise ValueError("speed_crf must be >= 0")
         if self.speed_preset not in {
-            "ultrafast", "superfast", "veryfast", "faster", "fast",
-            "medium", "slow", "slower", "veryslow"
+            "ultrafast",
+            "superfast",
+            "veryfast",
+            "faster",
+            "fast",
+            "medium",
+            "slow",
+            "slower",
+            "veryslow",
         }:
             raise ValueError("speed_preset must be a valid x264 preset")

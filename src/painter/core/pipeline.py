@@ -1,21 +1,19 @@
 from __future__ import annotations
 
 import math
-from typing import Optional
 
 import numpy as np
 from tqdm import tqdm
 
 from painter.config.config import Config
-from painter.io.files import load_image_rgb01, save_image_rgb01, load_brushes
 from painter.imagemath.image_math import hex_to_rgb01
+from painter.io.files import load_brushes, load_image_rgb01, save_image_rgb01
+from painter.logger.logger import get_logger
 from painter.strokes.brush_ops import Brush
 from painter.strokes.roi_selection import CooldownMap
 from painter.strokes.stroke_engine import PainterEngine
 from painter.video.recorder import VideoRecorder
 from painter.video.speed_ramp import apply_speed_ramp_inplace
-from painter.logger.logger import get_logger
-
 
 logger = get_logger(__name__)
 
@@ -47,8 +45,8 @@ def main(cfg: Config) -> None:
         rng=rng,
     )
 
-    recorder: Optional[VideoRecorder] = None
-    video_path_final: Optional[str] = None
+    recorder: VideoRecorder | None = None
+    video_path_final: str | None = None
     if cfg.make_video:
         recorder = VideoRecorder(cfg.output_video_path, fps=cfg.video_fps)
         video_path_final = recorder.path

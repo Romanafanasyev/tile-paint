@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-from typing import Optional
-
-import numpy as np
 import imageio.v2 as imageio
+import numpy as np
 
 from painter.io.files import ensure_dir_for, unique_path
 

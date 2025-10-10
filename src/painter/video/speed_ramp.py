@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import os
 import subprocess
-from typing import List, Optional, Tuple
 
 import imageio.v2 as imageio
 import imageio_ffmpeg
@@ -32,14 +31,15 @@ def _get_duration_seconds(path: str) -> float:
 def _has_audio_track(path: str, ffmpeg_bin: str) -> bool:
     proc = subprocess.run(
         [ffmpeg_bin, "-hide_banner", "-i", path],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        capture_output=True,
         text=True,
     )
-    return "Audio:" in proc.stderr
+    return "Audio:" in (proc.stderr or "")
 
 
-def _clamp_segments(total: float, slow_sec: float, fast_sec: float, margin: float = 0.02) -> Tuple[float, float]:
+def _clamp_segments(
+    total: float, slow_sec: float, fast_sec: float, margin: float = 0.02
+) -> tuple[float, float]:
     slow_sec = max(0.0, slow_sec)
     fast_sec = max(0.0, fast_sec)
     if slow_sec + fast_sec <= max(0.0, total - margin):
@@ -51,7 +51,7 @@ def _clamp_segments(total: float, slow_sec: float, fast_sec: float, margin: floa
 
 
 def _atempo_chain_str(speed: float) -> str:
-    chain: List[str] = []
+    chain: list[str] = []
     s = float(speed)
     if abs(s - 1.0) < 1e-6:
         return ""
@@ -73,11 +73,11 @@ def _build_filter_complex(
     with_audio: bool,
     slow_from: float,
     fast_to: float,
-):
+) -> tuple[str, str, str | None]:
     vin, ain = "0:v", "0:a"
     parts_v, parts_a, lines = [], [], []
 
-    def add_segment(t1, t2, speed, tag):
+    def add_segment(t1: float, t2: float, speed: float, tag: str) -> None:
         v_label = f"[v{tag}]"
         lines.append(
             f"[{vin}]trim=start={t1:.6f}:end={t2:.6f},setpts=PTS-STARTPTS,setpts=PTS/{speed:.6f}{v_label}"
@@ -91,7 +91,9 @@ def _build_filter_complex(
                     f"[{ain}]atrim=start={t1:.6f}:end={t2:.6f},asetpts=PTS-STARTPTS,{chain}{a_label}"
                 )
             else:
-                lines.append(f"[{ain}]atrim=start={t1:.6f}:end={t2:.6f},asetpts=PTS-STARTPTS{a_label}")
+                lines.append(
+                    f"[{ain}]atrim=start={t1:.6f}:end={t2:.6f},asetpts=PTS-STARTPTS{a_label}"
+                )
             parts_a.append(a_label)
 
     if slow_sec > 1e-6:
@@ -106,11 +108,15 @@ def _build_filter_complex(
     mid_start, mid_end = slow_sec, max(slow_sec, duration - fast_sec)
     if mid_end - mid_start > 1e-6:
         v_mid = "[vMid]"
-        lines.append(f"[{vin}]trim=start={mid_start:.6f}:end={mid_end:.6f},setpts=PTS-STARTPTS{v_mid}")
+        lines.append(
+            f"[{vin}]trim=start={mid_start:.6f}:end={mid_end:.6f},setpts=PTS-STARTPTS{v_mid}"
+        )
         parts_v.append(v_mid)
         if with_audio:
             a_mid = "[aMid]"
-            lines.append(f"[{ain}]atrim=start={mid_start:.6f}:end={mid_end:.6f},asetpts=PTS-STARTPTS{a_mid}")
+            lines.append(
+                f"[{ain}]atrim=start={mid_start:.6f}:end={mid_end:.6f},asetpts=PTS-STARTPTS{a_mid}"
+            )
             parts_a.append(a_mid)
 
     if fast_sec > 1e-6:
@@ -146,7 +152,7 @@ def apply_speed_ramp_inplace(
     steps: int,
     crf: int,
     preset: str,
-    fps: Optional[float],
+    fps: float | None,
     slow_from: float,
     fast_to: float,
 ) -> str:
