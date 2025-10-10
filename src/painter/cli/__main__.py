@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Optional
 
 from painter.config.config import Config
 from painter.core import pipeline
+from painter.logger.logger import configure_logging
 
 
 # TODO: tune actual values for these presets
@@ -39,6 +40,14 @@ def _build_parser() -> argparse.ArgumentParser:
         choices=sorted(PRESETS.keys()),
         help="Quick preset (fast|balanced|quality). Flags after the preset override its values.",
         default=None,
+    )
+
+    # Logger
+    p.add_argument(
+        "--log-level",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
+        default="INFO",
+        help="Logging verbosity (default: INFO).",
     )
 
     # Paths (relative to src/ or absolute)
@@ -142,6 +151,7 @@ def _apply_workload_derivatives(overrides: Dict[str, Any], ws: int) -> None:
 def main() -> None:
     parser = _build_parser()
     args = parser.parse_args()
+    configure_logging(args.log_level)
 
     overrides: Dict[str, Any] = {}
     if args.preset:

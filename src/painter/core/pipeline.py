@@ -14,6 +14,10 @@ from painter.strokes.roi_selection import CooldownMap
 from painter.strokes.stroke_engine import PainterEngine
 from painter.video.recorder import VideoRecorder
 from painter.video.speed_ramp import apply_speed_ramp_inplace
+from painter.logger.logger import get_logger
+
+
+logger = get_logger(__name__)
 
 
 def main(cfg: Config) -> None:
@@ -89,12 +93,13 @@ def main(cfg: Config) -> None:
                     fast_to=cfg.speed_fast_to,
                 )
             except Exception as e:
-                print(f"[warn] speed postprocess failed: {e}")
+                logger.warning(f"Speed postprocess failed: {e}")
 
+    final_mse = float(np.mean(engine.err_map))
     if recorder is not None and video_path_final:
-        print(f"Done. Image: {img_path} | Video: {video_path_final}")
+        logger.info(f"Done | image={img_path} video={video_path_final} mse={final_mse:.6g}")
     else:
-        print(f"Done. Image: {img_path}")
+        logger.info(f"Done | image={img_path} mse={final_mse:.6g}")
 
 
 if __name__ == "__main__":

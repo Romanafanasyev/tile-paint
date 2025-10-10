@@ -17,6 +17,10 @@ from painter.strokes.brush_ops import Brush, build_weight_mask
 from painter.strokes.geometry import overlap_mask_and_frame
 from painter.strokes.roi_selection import CooldownMap, select_roi_center
 from painter.strokes.sizes import make_all_sizes
+from painter.logger.logger import get_logger
+
+
+logger = get_logger(__name__)
 
 
 def _local_gradient_angle_deg(
@@ -196,6 +200,7 @@ class PainterEngine:
             self.accept_window.clear()
             self.phase_max_attempts = self._phase_max_attempts_for(self.size_px)
             self.cooldown.reset()
+            logger.debug(f"Phase -> size={self.size_px}px (level {self.level + 1}/{len(self.sizes)})")
 
     def step(self) -> bool:
         """
