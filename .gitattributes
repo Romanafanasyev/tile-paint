@@ -1,0 +1,12 @@
+# Normalize line endings for text, keep binaries untouched
+* text=auto eol=lf
+
+# Treat common binary assets as binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.mp4 binary
+
+# Help GitHub Linguist focus on source code
+docs/** linguist-documentation
+assets/** linguist-vendored
